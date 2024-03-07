@@ -1,5 +1,5 @@
 import sqlite3
-import time, os
+import time, os, sys
 import requests
 import random
 from errors import E401, E404, E429, E500504
@@ -65,7 +65,7 @@ def get_weather(api_key, city_name):
         timer = count[0][0]
 
     else:
-        timer = time_now - 1000
+        timer = time_now
     print(time_now, timer)
 
     if len_c > 0 and timer + 600 >= time_now:
@@ -139,7 +139,7 @@ def get_weather(api_key, city_name):
                  name],
             )
 
-            if count_idx > 10:
+            if count_idx < 10:
                 conn.commit()
                 print(f"Commit! {city_name}")
 
@@ -195,9 +195,18 @@ if __name__ == '__main__':
     create_table()
 
     city = random.choice(cities)
-    #city = 'New York Cit'
+    print(city)
 
     API_KEY = input('Введите API key: ')
+    LOCK_FILE = f".lock_{API_KEY}"
+
+    if os.path.exists(LOCK_FILE):
+        print("API key is already in use. Exiting.")
+        sys.exit(1)
+
+    with open(LOCK_FILE, "w"):
+        # Создаем файл блокировки
+        pass
 
     print("1 - Информация оп одному городу.\n2 - Обновление данные по имеющимся городам.")
     mode = int(input("Выберете режим работы: "))
@@ -210,9 +219,14 @@ if __name__ == '__main__':
         cur.execute(f"SELECT name FROM {table_name};")
         cities = [i[0] for i in cur.fetchall()]
 
+        for city in cities:
+            weather_data = get_weather(API_KEY, city)
+
     print(weather_data)
 
     cur.close()
     conn.close()
+
+    os.remove(LOCK_FILE)
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
