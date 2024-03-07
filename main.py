@@ -3,16 +3,19 @@ import time, os
 import requests
 import random
 from errors import E401, E404, E429, E500504
-from constants import API_KEY
+#from constants import API_KEY
 
 """
 Техническая документация:
     + SDK должно принимать API KEY для OpenWeatherAPI при инициализации.
     + SDK должно принимать название города и возвращать информацию о погоде на текущий момент. SDK возвращает информацию о первом городе, который был найден при поиске по названию города.
-    SDK должно хранить информацию о погоде о запрошенных городах и, если это актуально, возвращать сохраненное значение (погода считается актуальной, если прошло менее 10 минут).
-    Для экономии памяти SDK может хранить информацию не более чем о 10 городах одновременно.
-    SDK должно иметь два типа поведения: по запросу и режим опроса. В режиме по запросу SDK обновляет информацию о погоде только по запросам клиента. В режиме опроса SDK запрашивает новую информацию о погоде для всех сохраненных местоположений, чтобы обеспечить нулевую задержку при ответе на запросы клиентов. Режим SDK должен передаваться в качестве параметра при инициализации.
-    Методы SDK должны выбрасывать исключение с описанием причины в случае сбоя.
+    + SDK должно хранить информацию о погоде о запрошенных городах и, если это актуально, возвращать сохраненное значение (погода считается актуальной, если прошло менее 10 минут).
+    + Для экономии памяти SDK может хранить информацию не более чем о 10 городах одновременно.
+    SDK должно иметь два типа поведения: по запросу и режим опроса. 
+            В режиме по запросу SDK обновляет информацию о погоде только по запросам клиента. 
+            В режиме опроса SDK запрашивает новую информацию о погоде для всех сохраненных местоположений, чтобы обеспечить нулевую задержку при ответе на запросы клиентов. Режим SDK должен передаваться в качестве параметра при инициализации.
+    + Методы SDK должны выбрасывать исключение с описанием причины в случае сбоя.
+    
     Преимущество: разработать процесс создания SDK таким образом, чтобы можно было работать с разными ключами, при этом создание двух копий объекта с одинаковым ключом невозможно. Также добавить метод для удаления объекта.
     Большое преимущество: наличие модульных тестов для методов SDK (использовать заглушки для сетевых запросов)."""
 
@@ -25,43 +28,84 @@ cur = conn.cursor()
 def create_table():
     cur.execute(
         f"""CREATE TABLE IF NOT EXISTS {table_name}(
-    Unix_time INT,
-    Name TEXT);
+    unix_time INT,
+    weather_main TEXT,
+    weather_description TEXT,
+    temperature_temp REAL,
+    temperature_feels_like REAL,
+    visibility INT,
+    wind_speed REAL,
+    datetime INT,
+    sys_sunrise INT,
+    sys_sunset INT,
+    timezone INT,
+    name TEXT);
     """
     )
     conn.commit()
     print("DB is CREATE!")
 
-class WeatherInCity:
-    def __init__(self, api_key, city_name):
-        self.api_key = api_key
-        self.city_name = city_name
 
-    def get_weather(self):
-        #Проверить есть ли город в базе и подходит ли время.
-        cur.execute(f"SELECT Link FROM {table_name} WHERE Link=?;", [link])
+def get_weather(api_key, city_name):
+    cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+    count_idx = cur.fetchone()[0]  # Получаем значение из результата запроса
+    print(count_idx)
 
+    #Проверить есть ли город в базе и подходит ли время.
+    print(city_name)
+    cur.execute(f"SELECT unix_time, name FROM {table_name} WHERE name=?;", (city_name,))
+    count = cur.fetchall()
+    print(count)
+    print(len(count))
+    len_c = len(count)
 
+    time_now = time.time()
 
+    if len_c > 0:
+        timer = count[0][0]
 
-        url = f'https://api.openweathermap.org/data/2.5/weather?q={self.city_name}&appid={self.api_key}'
+    else:
+        timer = time_now - 1000
+    print(time_now, timer)
+
+    if len_c > 0 and timer + 600 >= time_now:
+        cur.execute(f"SELECT * FROM {table_name} WHERE name=?", (city_name,))
+        row = cur.fetchall()[0]
+        print(row)
+        weather_main = row[1]
+        weather_description = row[2]
+        temperature_temp = row[3]
+        temperature_feels_like = row[4]
+        visibility = row[5]
+        wind_speed = row[6]
+        datetime = row[7]
+        sys_sunrise = row[8]
+        sys_sunset = row[9]
+        timezone = row[10]
+        name = row[11]
+
+    else:
+        url = f'https://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={api_key}'
         r = requests.get(url)
 
         if r.status_code == 401:
+            print(f'Error {r.status_code}')
             return E401
 
         elif r.status_code == 404:
+            print(f'Error {r.status_code}')
             return E404
 
         elif r.status_code == 429:
+            print(f'Error {r.status_code}')
             return E429
 
         elif r.status_code in [500, 502, 503, 504]:
+            print(f'Error {r.status_code}')
             return E500504
 
         elif r.status_code == 200:
             r = r.json()
-            print(r)
             weather_main = r['weather'][0]['main']
             weather_description = r['weather'][0]['description']
             temperature_temp = r['main']['temp']
@@ -74,29 +118,54 @@ class WeatherInCity:
             timezone = r['timezone']
             name = r['name']
 
+            if timer + 600 < time_now:
+                #Удалить старую строку
+                cur.execute(f"DELETE FROM {table_name} WHERE name=?", (city_name,))
+                print(f'Delete old data {city_name}')
+
+            cur.execute(
+                f"INSERT INTO {table_name} VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+                [int(time.time()),
+                 weather_main,
+                 weather_description,
+                 temperature_temp,
+                 temperature_feels_like,
+                 visibility,
+                 wind_speed,
+                 datetime,
+                 sys_sunrise,
+                 sys_sunset,
+                 timezone,
+                 name],
+            )
+
+            if count_idx > 10:
+                conn.commit()
+                print(f"Commit! {city_name}")
+
         else:
             return f"status_code = {r.status_code}"
 
-        return {
-            "weather": {
-                "main": weather_main,
-                "description": weather_description,
-            },
-            "temperature": {
-                "temp": temperature_temp,
-                "feels_like": temperature_feels_like,
-            },
-            "visibility": visibility,
-            "wind": {
-                "speed": wind_speed,
-            },
-            "datetime": datetime,
-            "sys": {
-                "sunrise": sys_sunrise,
-                "sunset": sys_sunset,
-            },
-            "timezone": timezone,
-            "name": name}
+    return {
+        "weather": {
+            "main": weather_main,
+            "description": weather_description,
+        },
+        "temperature": {
+            "temp": temperature_temp,
+            "feels_like": temperature_feels_like,
+        },
+        "visibility": visibility,
+        "wind": {
+            "speed": wind_speed,
+        },
+        "datetime": datetime,
+        "sys": {
+            "sunrise": sys_sunrise,
+            "sunset": sys_sunset,
+        },
+        "timezone": timezone,
+        "name": name}
 
 cities = [
         "Tokyo",
@@ -108,7 +177,7 @@ cities = [
         "Beijing",
         "Osaka",
         "Cairo",
-        "New York City",
+        "New York",
         "Dhaka",
         "Karachi",
         "Buenos Aires",
@@ -126,8 +195,24 @@ if __name__ == '__main__':
     create_table()
 
     city = random.choice(cities)
-    weather_instance = WeatherInCity(API_KEY, city)
-    weather_data = weather_instance.get_weather()
+    #city = 'New York Cit'
+
+    API_KEY = input('Введите API key: ')
+
+    print("1 - Информация оп одному городу.\n2 - Обновление данные по имеющимся городам.")
+    mode = int(input("Выберете режим работы: "))
+
+    if mode == 1:
+        city = input('Укажите город: ')
+        weather_data = get_weather(API_KEY, city)
+
+    else:
+        cur.execute(f"SELECT name FROM {table_name};")
+        cities = [i[0] for i in cur.fetchall()]
+
     print(weather_data)
+
+    cur.close()
+    conn.close()
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
