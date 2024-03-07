@@ -73,4 +73,4 @@ License
 This project is licensed under the MIT License. See the LICENSE file for more details.
 Author
 
-This SDK is maintained by [Your Name]. For inquiries or support, please contact [your_email@example.com].
+This SDK is maintained by rendysmith. For inquiries or support, please contact ritmorica@gmail.com.
